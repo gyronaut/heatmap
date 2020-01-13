@@ -17,18 +17,29 @@ def coord2px(lat, lon, zoom):
     return [int(x),int(y)]
 
 # everytime a track crosses to a new tile, need to add two midpoints that connect each tile's segment to the tile edge
-def addBoundaryPoints(segment, oldsegment):
-    a = segment['points'][len(segment['points'])-1]
-    b = oldsegment['points'][len(oldsegment['points'])-1]
-    deltilex = segment['x']-oldsegment['x']
-    deltiley = segment['y']-oldsegment['y']
+
+# TODO fix bug with boundary points... (adding points to corners?)
+def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum):
+    a = segment[0]
+    b = oldsegment[len(oldsegment)-1]
+    deltilex = (tilenum%(2<<16)) - (oldtilenum%(2<<16))
+    deltiley = (tilenum >> 17) - (oldtilenum >> 17)
     delx = a[0]-(b[0] - 255*deltilex)
     dely = a[1]-(b[1] - 255*deltiley)
+    print(a,b)
+    print(delx, dely)
+    mida = []
+    midb = []
     if delx==0:
         mida = [a[0], round(float(a[1])/255.0)*255]
         midb = [b[0], round(float(b[1])/255.0)*255]
-        oldsegment['points'].append(midb)
-        segment['points'].insert(0, mida)
+        oldsegment.append(midb)
+        segment.insert(0, mida)
+    elif dely==0:
+        mida = [round(float(a[0])/255.0)*255, a[1]]
+        midb = [round(float(b[0])/255.0)*255, b[1]]
+        oldsegment.append(midb)
+        segment.insert(0, mida)
     else:    
         m = float(dely)/float(delx)
         if deltilex!=0:
@@ -36,25 +47,31 @@ def addBoundaryPoints(segment, oldsegment):
             miday = math.ceil(a[1] - m*(a[0]-midax))
             midbx = round(float(b[0])/255.0)*255
             midby = math.ceil(b[1] + m*(midbx - b[0]))
-            oldsegment['points'].append([midbx, midby])
-            segment['points'].insert(0, [midax, miday])
+            mida = [midax, miday]
+            midb = [midbx, midby]
+            oldsegment.append([midbx, midby])
+            segment.insert(0, [midax, miday])
         else:
             miday = round(float(a[1])/255.0)*255
             midax = math.ceil(a[0] - (a[1]-miday)/m)
             midby = round(float(b[1])/255.0)*255
             midbx = math.ceil(b[0] + (midby - b[1])/m)
-            oldsegment['points'].append([midbx, midby])
-            segment['points'].insert(0, [midax, miday])
+            mida = [midax, miday]
+            midb = [midbx, midby]
+            oldsegment.append([midbx, midby])
+            segment.insert(0, [midax, miday])
+    print(mida, midb)
 
 # each track segment needs a tile x,y, then a list of points that go from the boundary of the tile to the end point/another tile boundary, need separate storage element for each track segment (need new elem everytime a boundary is crossed)
 def parseGPX(gpxfile, zoom):
     ns = {'url': 'http://www.topografix.com/GPX/1/1'} #namespace for gpx file format
     tree = eltree.parse(gpxfile)
     root = tree.getroot()
-    oldtilex = -1
-    oldtiley = -1
+    oldtilex = 0
+    oldtiley = 0
+    oldtilenum = 0;
     segments = []
-    segment = {'x':oldtilex, 'y':oldtiley, 'points':[]}
+    tiles = {}
     points = []
     oldsegment = {}
     for trkpt in root.findall("./url:trk/url:trkseg/url:trkpt", ns):
@@ -63,41 +80,72 @@ def parseGPX(gpxfile, zoom):
         pxpt = coord2px(lat, lon, zoom) #convert lat and lon to web mercator pixels at given zoom level
         tilex = int(math.floor(pxpt[0]/256))
         tiley = int(math.floor(pxpt[1]/256))
+        tilenum = (tiley << 17) + tilex
+        #print("tilex: " + str(tilex) + ", " + str(tilenum%(2<<16)))
+        #print("tiley: " + str(tiley) + ", " + str(tilenum >> 17))
         pxpt[0] = pxpt[0]%256
         pxpt[1] = pxpt[1]%256
         
-        points.append(pxpt)
-        if (tilex != oldtilex or tiley != oldtiley): #check if tile boundary was crossed
+        if (tilenum != oldtilenum): #check if tile boundary was crossed
             #print("changed tiles")
-            oldsegment = segment
-            segment = {'x':tilex, 'y':tiley, 'points':[]}
-            if oldtilex != -1:
-                segment = {'x':tilex, 'y':tiley, 'points':[]}
-                segment['points'].append(pxpt)
-                addBoundaryPoints(segment, oldsegment) #adding new points that connect each segment to the edge of their tile
-                segments.append(oldsegment)
+            oldpoints = points.copy()
+            points = [pxpt]
+            if oldtilenum != 0:
+                addBoundaryPoints(points, tilenum, oldpoints, oldtilenum) #adding new points that connect each segment to the edge of their tile
+                if str(oldtilenum) in list(tiles):
+                    print("adding new segment to existing tile entry")
+                    tiles[str(oldtilenum)].append(oldpoints)
+                else:
+                    tiles[str(oldtilenum)] = [[]]
+                    tiles[str(oldtilenum)].append(oldpoints)
         else:
-            segment['points'].append(pxpt)
+             points.append(pxpt) 
+
         oldtilex = tilex
         oldtiley = tiley
-    segments.append(segment)
-    return segments
+        oldtilenum = tilenum
+
+    if str(oldtilenum) in list(tiles):
+        tiles[str(oldtilenum)].append(points)
+    else:
+        tiles[str(oldtilenum)] = [[]]
+        tiles[str(oldtilenum)].append(points)
+
+    return tiles
 
 def plotPoints(points):
-    zippoints = list(zip(*points))
-    plt.scatter(zippoints[0], zippoints[1], s=None, c=None, marker='.')
+    #print(points)
+    xpts = []
+    ypts = []
+    for i in range(1, len(points)):
+        for pt in points[i]:
+            xpts.append(pt[0])
+            ypts.append(pt[1])
+
+    #zippoints = list(zip(*points[1]))
+    #zippoints = [list(zippoints[0]), list(zippoints[1])]
+    #for i in range(2, len(points)):
+    #        zp = list(zip(*points[i]))
+    #        print(zp)
+    #        zippoints[0].append(list(zp[0]))
+    #        zippoints[1].append(list(zp[1]))
+    #plt.scatter(zippoints[0], zippoints[1], s=None, c=None, marker='.')
+    plt.scatter(xpts, ypts, s=None, c=None, marker='.')
     plt.xlim(0, 256)
     plt.ylim(256, 0)
     plt.show()
     #print(zippoints)
 
 def main():
-    zoom = 17
-    segments = parseGPX("/Users/jtblair/Downloads/activity_4400110058.gpx", zoom)
+    zoom = 15
+    tiles = parseGPX("/Users/jtblair/Downloads/activity_4400110058.gpx", zoom)
+    print(list(tiles))
     # TODO: loop through segments, output tiles using line algorithm
-    plotPoints(segments[3]['points'])
-    plotPoints(segments[4]['points'])
-    plotPoints(segments[5]['points'])
+    #plotPoints(tiles[list(tiles)[3]])
+    #plotPoints(segments[4]['points'])
+    #plotPoints(segments[5]['points'])
+    for tile in list(tiles):
+        plotPoints(tiles[tile])
 
 
 if __name__ == "__main__":
