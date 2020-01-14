@@ -18,7 +18,7 @@ def coord2px(lat, lon, zoom):
     return [int(x),int(y)]
 
 # everytime a track crosses to a new tile, need to add two midpoints that connect each tile's segment to the tile edge
-
+# TODO: check if either point is alread on a boundary, don't add a duplicate point if it is
 def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum):
     a = segment[0]
     b = oldsegment[len(oldsegment)-1]
@@ -52,6 +52,8 @@ def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum):
             midb = [midbx, midby]
     oldsegment.append(midb)
     segment.insert(0, mida)
+
+# TODO: filter out points that are too close together (i.e. don't append point thats the same as previous point)
 
 # each track segment needs a tile x,y, then a list of points that go from the boundary of the tile to the end point/another tile boundary, need separate storage element for each track segment (need new elem everytime a boundary is crossed)
 def parseGPX(gpxfile, zoom, tiles):
@@ -98,9 +100,6 @@ def parseGPX(gpxfile, zoom, tiles):
         tiles[str(oldtilenum)].append(points)
 
 def plot(x, y, mat):
-   # if(x+y*256 >= len(mat)):
-   #     print(x,y, len(mat))
-   # print(x, y, (x+(256*y)))
     mat[x+(256*y)]+=1
 
 def plotLineLow(x0, y0, x1, y1, mat):
@@ -112,12 +111,17 @@ def plotLineLow(x0, y0, x1, y1, mat):
         dy = -dy
     D = (dy<<1) -dx
     y = y0
-    for x in range(x0, x1+1):
+    if(D > 0):
+        y = y + ystep
+        D = D-(dx<<1)
+    D = D + (dy<<1)
+    for x in range(x0+1, x1):
         plot(x, y, mat)
         if(D > 0):
             y = y + ystep
             D = D-(dx<<1)
         D = D + (dy<<1)
+
 
 def plotLineHigh(x0, y0, x1, y1, mat):
     dx = x1-x0
@@ -128,14 +132,18 @@ def plotLineHigh(x0, y0, x1, y1, mat):
         dx = -dx
     D = (dx<<1) - dy
     x = x0
-    for y in range(y0, y1+1):
+    if(D > 0):
+        x = x + xstep
+        D = D-(dy<<1)
+    D = D + (dx<<1)
+    for y in range(y0+1, y1):
         plot(x, y, mat)
         if(D > 0):
             x = x + xstep
             D = D-(dy<<1)
         D = D + (dx<<1)
 
-# TODO: figure out how to prevent double counting at start and end points of lines
+
 def plotLine(x0, y0, x1, y1, mat):
     dx = abs(x1-x0)
     dy = abs(y1-y0)
@@ -154,12 +162,14 @@ def plotLine(x0, y0, x1, y1, mat):
 
 def tile2matrix(segments):
     mat = [0]*256*256
-    print(len(mat))
     for segment in segments:
-        if len(segment) == 0:
+        length  = len(segment)
+        if length == 0:
             continue
-        for ipt in range(0, len(segment)-1):
+        for ipt in range(0, length-1):
+            plot(segment[ipt][0], segment[ipt][1], mat)
             plotLine(segment[ipt][0], segment[ipt][1], segment[ipt+1][0], segment[ipt+1][1], mat)
+        plot(segment[length-1][0], segment[length-1][1], mat)
     return mat
 
 
@@ -180,15 +190,15 @@ def main():
     tiles = {}
     parseGPX("/Users/jtblair/Downloads/activity_4400110058.gpx", zoom, tiles)
     parseGPX("/Users/jtblair/Downloads/activity_4425559408.gpx", zoom, tiles)
-    print(list(tiles))
     # TODO: loop through tiles to output data in arrays   
     #pyplotPoints(tiles[tile])
-    pyplotPoints(tiles[list(tiles)[4]])
+    #pyplotPoints(tiles[list(tiles)[4]])
     mat = tile2matrix(tiles[list(tiles)[4]]) #connect points using bresenham's line algorithm, output tiles as 256x256 arrays
-    testpoints = [[], [[10, 10], [11,11], [11, 20], [12,21], [11,22], [22,22], [25,27], [25, 35], [24, 36]]]
+    #testpoints = [[],[[49, 51], [48, 54], [46, 55], [48, 65]]]
+    testpoints = [[],[[49, 51], [48, 54], [44, 56]]]
     testmat = tile2matrix(testpoints)
     w = png.Writer(size=(256,256), greyscale=True, bitdepth = 2)
-    rows = w.array_scanlines(testmat)
+    rows = w.array_scanlines(mat)
     f = open("test.png", "wb")
     w.write(f, rows)
     f.close()
