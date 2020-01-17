@@ -3,6 +3,7 @@ import xml.etree.ElementTree as eltree
 import matplotlib.pyplot as plt
 import png
 import os
+import fnmatch
 
 # TODO: figure out how to log-in and authenticate before retreiving activity data
 
@@ -20,7 +21,6 @@ def coord2px(lat, lon, zoom):
     return [int(x),int(y)]
 
 # everytime a track crosses to a new tile, need to add two midpoints that connect each tile's segment to the tile edge
-# TODO: check if either point is alread on a boundary, don't add a duplicate point if it is
 def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum):
     a = segment[0]
     b = oldsegment[len(oldsegment)-1]
@@ -77,7 +77,7 @@ def parseGPX(gpxfile, zoom, tiles):
         pxpt = coord2px(lat, lon, zoom) #convert lat and lon to web mercator pixels at given zoom level
         tilex = int(math.floor(pxpt[0]/256))
         tiley = int(math.floor(pxpt[1]/256))
-        tilenum = (tiley << 17) + tilex
+        tilenum = (tiley << (zoom+1)) + tilex
         pxpt[0] = pxpt[0]%256
         pxpt[1] = pxpt[1]%256
         
@@ -193,43 +193,49 @@ def pyplotPoints(points):
     plt.ylim(256, 0)
     plt.show()
 
-def getTileBounds(tiles):
-    xmin = 2<<16
+def getTileBounds(tiles, zoom):
+    xmin = 2<<zoom
     xmax = -1
-    ymin = 2<<16
+    ymin = 2<<zoom
     ymax = -1
     for tile in tiles:
-        if(tile%(2<<16) > xmax):
-            xmax = tile%(2<<16)
-        if(tile%(2<<16) < xmin):
-            xmin = tile%(2<<16)
-        if(tile>>17 > ymax):
-            ymax = tile>>17
-        if(tile>>17 < ymin):
-            ymin = tile>>17
+        if(tile%(2<<zoom) > xmax):
+            xmax = tile%(2<<zoom)
+        if(tile%(2<<zoom) < xmin):
+            xmin = tile%(2<<zoom)
+        if(tile>>(zoom+1) > ymax):
+            ymax = tile>>(zoom+1)
+        if(tile>>(zoom+1) < ymin):
+            ymin = tile>>(zoom+1)
     return (xmin, ymin, xmax, ymax)
 
-#TODO: figure out a smarter way to handle this so it only produces tiles that have actual data in them
-def zoomUp(yrow, xmin, xmax, matrices, zoommatrices):
-    tilenums = list(matrices)
-    zmatrix = [0]*256
-    y = yrow
-    if(yrow%2 == 1):
-        y-=1
-    for x in range(xmin, xmax):
-        if 
+def zoomUp(zoom, tile, has_data, matrices, zoommatrices):
+    zmatrix = [0]*256*256
+    for i in range(0, 4):
+        if(has_data[i]):
+            mat = matrices[((tile[1]+(i>>1))<<(zoom+2))+(tile[0]+(i%2))]
+            for row in range(0, 128):
+                for col in range(0, 128):
+                    zrow = 128*(i>>1)+row
+                    zcol = 128*(i%2)+col
+                    zmatrix[(zrow<<8)+zcol] = mat[(row<<9)+(col<<1)]+mat[(row<<9)+(col<<1)+1]+mat[(row<<9) + 256 + (col<<1)]+mat[(row<<9)+256+(col<<1)+1]
+    zoommatrices[(tile[1]<<(zoom))+(tile[0]>>1)] = zmatrix
+
+#TODO: normalize matrices with some sort of function to get better contrast between low and high heat points
 
 def main():
     zoommax = 16
     zoommin = 13
     tiles = {}
-    files = ["activity_4400110058.gpx", "activity_4425559408.gpx", "activity_4411465891.gpx", "activity_4440528100.gpx"]
+    #files = ["activity_4400110058.gpx", "activity_4425559408.gpx", "activity_4411465891.gpx", "activity_4440528100.gpx"]
+    files = []
     filelocation = "/Users/jtblair/Downloads/"
+    for f in os.listdir(filelocation):
+        if fnmatch.fnmatch(f, "activity_4*.gpx"):
+            files.append(f)
 
     for f in files:
-        parseGPX(filelocation+f, zoom, tiles)
-    
-    # TODO: loop through tiles to output data in arrays
+        parseGPX(filelocation+f, zoommax, tiles)
     
     #testpoints = [[],[[49, 51], [48, 54], [44, 56]]]
     #testmat = tile2matrix(testpoints)
@@ -249,22 +255,44 @@ def main():
         w.write(f, rows)
         f.close()
 
-    zoommatrices = {}
     for zlevel in range(1, zoommax - zoommin +1):
+        zoommatrices = {}
         zoom = zoommax - zlevel
+        if not os.path.exists("map/"+str(zoom)):
+            os.mkdir("map/"+str(zoom))
         #Get max and min tile x and tile y numbers to determine how many tiles at this zoom are needed
-        tilebounds = getTileBounds(list(matrices))    
+        tilebounds = getTileBounds(list(matrices), zoom+1)
         #starting at min y row, find all tiles 1 above or below and create tiles just for those that have at least 1 sub-tile filled
         yrow = tilebounds[1]
-        while(yrow < tilebounds[3]+1):
-            print("do row of tiles")
-            zoomUp(yrow, matrices, zoommatrices)
+        print(tilebounds)
+        while(yrow < tilebounds[3]+2):
+            xcol = tilebounds[0]
+            while(xcol < tilebounds[2]+2):
+                has_data = [False, False, False, False]
+                y0 = yrow-(yrow%2)
+                y1 = y0+1
+                has_data[0+(xcol%2)] = ((y0<<zoom+2)+xcol in matrices)
+                has_data[2+(xcol%2)] = ((y1<<zoom+2)+xcol in matrices)
+                if(True in has_data):
+                    #check 1 col right for tiles with data (only if x even)
+                    if(xcol%2==0):
+                        has_data[1] = ((y0<<zoom+2)+xcol+1 in matrices)
+                        has_data[3] = ((y1<<zoom+2)+xcol+1 in matrices)
+                    x0 = xcol -(xcol%2)
+                    zoomUp(zoom, (x0, y0), has_data, matrices, zoommatrices)
+                    if not os.path.exists("map/"+str(zoom)+"/"+str(x0>>1)):
+                        os.mkdir("map/"+str(zoom)+"/"+str(x0>>1))
+                    w = png.Writer(size=(256,256), greyscale=True, bitdepth = 3+zlevel)            
+                    rows = w.array_scanlines(zoommatrices[(y0<<zoom) + (x0>>1)])
+                    f = open("map/"+str(zoom)+"/"+str(x0>>1)+"/"+str(y0>>1)+".png", "wb")
+                    w.write(f, rows)
+                    f.close()
+
+                    xcol+=2-(xcol%2)
+                else:
+                    xcol+=1
             yrow += 2
-        #move y row up 2 and repeat
-        #set zoommatrix to matrix
-
-        
-
+        matrices = zoommatrices.copy()
 
 if __name__ == "__main__":
     main()
