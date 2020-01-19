@@ -209,7 +209,7 @@ def getTileBounds(tiles, zoom):
             ymin = tile>>(zoom+1)
     return (xmin, ymin, xmax, ymax)
 
-def zoomUp(zoom, tile, has_data, matrices, zoommatrices):
+def zoomOutTile(zoom, tile, has_data, matrices, zoommatrices):
     zmatrix = [0]*256*256
     for i in range(0, 4):
         if(has_data[i]):
@@ -221,11 +221,49 @@ def zoomUp(zoom, tile, has_data, matrices, zoommatrices):
                     zmatrix[(zrow<<8)+zcol] = mat[(row<<9)+(col<<1)]+mat[(row<<9)+(col<<1)+1]+mat[(row<<9) + 256 + (col<<1)]+mat[(row<<9)+256+(col<<1)+1]
     zoommatrices[(tile[1]<<(zoom))+(tile[0]>>1)] = zmatrix
 
-#TODO: normalize matrices with some sort of function to get better contrast between low and high heat points
+def zoomOut(zoom, matrices):
+    zoommatrices = {}
+    #Get max and min tile x and tile y numbers to determine how many tiles at this zoom are needed
+    tilebounds = getTileBounds(list(matrices), zoom+1)
+    #starting at min y row, find all tiles 1 above or below and create tiles just for those that have at least 1 sub-tile filled
+    yrow = tilebounds[1]
+    print(tilebounds)
+    while(yrow < tilebounds[3]+2):
+        xcol = tilebounds[0]
+        while(xcol < tilebounds[2]+2):
+            has_data = [False, False, False, False]
+            y0 = yrow-(yrow%2)
+            y1 = y0+1
+            has_data[0+(xcol%2)] = ((y0<<zoom+2)+xcol in matrices)
+            has_data[2+(xcol%2)] = ((y1<<zoom+2)+xcol in matrices)
+            if(True in has_data):
+                #check 1 col right for tiles with data (only if x even)
+                if(xcol%2==0):
+                    has_data[1] = ((y0<<zoom+2)+xcol+1 in matrices)
+                    has_data[3] = ((y1<<zoom+2)+xcol+1 in matrices)
+                x0 = xcol -(xcol%2)
+                zoomOutTile(zoom, (x0, y0), has_data, matrices, zoommatrices)
+                saveMatrixAsPNG(zoom, x0>>1, y0>>1, zoommatrices[(y0<<zoom) + (x0>>1)]) 
+                xcol+=2-(xcol%2)
+            else:
+                xcol+=1
+        yrow += 2
+    return zoommatrices
+
+def saveMatrixAsPNG(zoom, x, y, matrix):
+    if not os.path.exists("map/"+str(zoom)+"/"+str(x)):
+        os.mkdir("map/"+str(zoom)+"/"+str(x))
+    w = png.Writer(size=(256,256), greyscale=True, bitdepth = 3+16-zoom)            
+    rows = w.array_scanlines(matrix)
+    f = open("map/"+str(zoom)+"/"+str(x)+"/"+str(y)+".png", "wb")
+    w.write(f, rows)
+    f.close()
+
+#TODO: normalize matrices with some sort of function (CDF?) to get better contrast between high and low heat points
 
 def main():
     zoommax = 16
-    zoommin = 13
+    zoommin = 12
     tiles = {}
     #files = ["activity_4400110058.gpx", "activity_4425559408.gpx", "activity_4411465891.gpx", "activity_4440528100.gpx"]
     files = []
@@ -247,51 +285,20 @@ def main():
         tile2matrix(tile, tiles[tile], matrices) #connect points using bresenham's line algorithm, output tiles as 256x256 arrays
         x = tile%(2<<16)
         y = tile>>17
-        if not os.path.exists("map/"+str(zoom)+"/"+str(x)):
-            os.mkdir("map/"+str(zoom)+"/"+str(x))
-        w = png.Writer(size=(256,256), greyscale=True, bitdepth = 2)            
-        rows = w.array_scanlines(matrices[tile])
-        f = open("map/"+str(zoom)+"/"+str(x)+"/"+str(y)+".png", "wb")
-        w.write(f, rows)
-        f.close()
+        saveMatrixAsPNG(zoom, x, y, matrices[tile])
+       # if not os.path.exists("map/"+str(zoom)+"/"+str(x)):
+       #     os.mkdir("map/"+str(zoom)+"/"+str(x))
+       # w = png.Writer(size=(256,256), greyscale=True, bitdepth = 2)            
+       # rows = w.array_scanlines(matrices[tile])
+       # f = open("map/"+str(zoom)+"/"+str(x)+"/"+str(y)+".png", "wb")
+       # w.write(f, rows)
+       # f.close()
 
     for zlevel in range(1, zoommax - zoommin +1):
-        zoommatrices = {}
         zoom = zoommax - zlevel
         if not os.path.exists("map/"+str(zoom)):
             os.mkdir("map/"+str(zoom))
-        #Get max and min tile x and tile y numbers to determine how many tiles at this zoom are needed
-        tilebounds = getTileBounds(list(matrices), zoom+1)
-        #starting at min y row, find all tiles 1 above or below and create tiles just for those that have at least 1 sub-tile filled
-        yrow = tilebounds[1]
-        print(tilebounds)
-        while(yrow < tilebounds[3]+2):
-            xcol = tilebounds[0]
-            while(xcol < tilebounds[2]+2):
-                has_data = [False, False, False, False]
-                y0 = yrow-(yrow%2)
-                y1 = y0+1
-                has_data[0+(xcol%2)] = ((y0<<zoom+2)+xcol in matrices)
-                has_data[2+(xcol%2)] = ((y1<<zoom+2)+xcol in matrices)
-                if(True in has_data):
-                    #check 1 col right for tiles with data (only if x even)
-                    if(xcol%2==0):
-                        has_data[1] = ((y0<<zoom+2)+xcol+1 in matrices)
-                        has_data[3] = ((y1<<zoom+2)+xcol+1 in matrices)
-                    x0 = xcol -(xcol%2)
-                    zoomUp(zoom, (x0, y0), has_data, matrices, zoommatrices)
-                    if not os.path.exists("map/"+str(zoom)+"/"+str(x0>>1)):
-                        os.mkdir("map/"+str(zoom)+"/"+str(x0>>1))
-                    w = png.Writer(size=(256,256), greyscale=True, bitdepth = 3+zlevel)            
-                    rows = w.array_scanlines(zoommatrices[(y0<<zoom) + (x0>>1)])
-                    f = open("map/"+str(zoom)+"/"+str(x0>>1)+"/"+str(y0>>1)+".png", "wb")
-                    w.write(f, rows)
-                    f.close()
-
-                    xcol+=2-(xcol%2)
-                else:
-                    xcol+=1
-            yrow += 2
+        zoommatrices = zoomOut(zoom, matrices)
         matrices = zoommatrices.copy()
 
 if __name__ == "__main__":
