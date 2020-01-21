@@ -1,4 +1,5 @@
 import math
+import random
 import xml.etree.ElementTree as eltree
 import matplotlib.pyplot as plt
 import png
@@ -243,23 +244,96 @@ def zoomOut(zoom, matrices):
                     has_data[3] = ((y1<<zoom+2)+xcol+1 in matrices)
                 x0 = xcol -(xcol%2)
                 zoomOutTile(zoom, (x0, y0), has_data, matrices, zoommatrices)
-                saveMatrixAsPNG(zoom, x0>>1, y0>>1, zoommatrices[(y0<<zoom) + (x0>>1)]) 
                 xcol+=2-(xcol%2)
             else:
                 xcol+=1
         yrow += 2
     return zoommatrices
 
-def saveMatrixAsPNG(zoom, x, y, matrix):
+def makePalette(cdf, bd):
+    bg = (30, 30, 30)
+    low = (60, 30, 155)
+    high = (130, 240, 255)
+    palette = [bg]
+    rstep = int((high[0]-low[0])/(len(cdf)-3))
+    gstep = int((high[1]-low[1])/(len(cdf)-3))
+    bstep = int((high[2]-low[2])/(len(cdf)-3))
+    for i in range(0, len(cdf)-2):
+        palette.append((low[0]+i*rstep, low[1]+i*gstep, low[2]+i*bstep))
+    #print(cdf)
+    for j in range(len(palette), 1<<bd):
+        palette.append(high)
+    return palette
+
+def saveMatrixAsPNG(zoom, x, y, cdf, matrix):
+    bd = 8
+    #numcolors = len(cdf)-1
+    #while(bd <= numcolors):
+    #    bd=bd<<1
+    #    numcolors = math.ceil(numcolors/2.0)
+    p = makePalette(cdf, bd)
+    print(p[1], p[2], p[3])
     if not os.path.exists("map/"+str(zoom)+"/"+str(x)):
         os.mkdir("map/"+str(zoom)+"/"+str(x))
-    w = png.Writer(size=(256,256), greyscale=True, bitdepth = 3+16-zoom)            
+
+    w = png.Writer(size=(256,256), palette = p, bitdepth = bd)            
     rows = w.array_scanlines(matrix)
     f = open("map/"+str(zoom)+"/"+str(x)+"/"+str(y)+".png", "wb")
     w.write(f, rows)
     f.close()
 
 #TODO: normalize matrices with some sort of function (CDF?) to get better contrast between high and low heat points
+def calcCDF(matrices):
+    numMat = 10
+    if(numMat > len(matrices)):
+        numMat = len(matrices)
+    data = []
+    imat = 0
+    for matrix in matrices:
+        if (imat >= numMat):
+            break
+        data = data + matrices[matrix]
+        imat+=1
+    data.sort(reverse = True)
+    histo = [0]*100
+    sample = random.sample(range(0, 256*256), 20000)
+    for idx in sample:
+        pt = data[idx]
+        if(pt>99):
+            pt=99
+        histo[pt]+=1
+    cdf=[0]*100
+    cdfSteps = [0]*9
+    tot = 0
+    for i in range(0,100):
+        cdf[i] = (histo[i]+tot)/20000.0
+        tot+=histo[i]
+    istep = 1
+    step = 0.1
+    offset = 0.0
+    for i in range(1,100):
+        if(cdf[i]>(offset+(istep*step))):
+            cdfSteps[istep] = i
+            if(cdf[i]>step*2.0):
+                step = ((1.0-cdf[i])/float(10-istep))
+                offset = cdf[i]
+            istep+=1
+    trimmedCDFSteps = [0]*(istep-1)
+    for i in range(0, istep-1):
+        trimmedCDFSteps[i] = cdfSteps[i]
+    trimmedCDFSteps.append(999)
+    return trimmedCDFSteps
+    
+
+def normalize(matrices):
+    cdf = calcCDF(matrices)
+    #print(cdf)
+    for matrix in matrices:
+        for px in matrices[matrix]:
+            for i in range(0, len(cdf)-1):
+                if (px > cdf[i] and px <= cdf[i+1]):
+                    px = i+1
+    return cdf
 
 def main():
     zoommax = 16
@@ -281,25 +355,27 @@ def main():
     if not os.path.exists("map/"+str(zoom)):
             os.mkdir("map/"+str(zoom))
     matrices = {}
+
     for tile in tiles:
         tile2matrix(tile, tiles[tile], matrices) #connect points using bresenham's line algorithm, output tiles as 256x256 arrays
-        x = tile%(2<<16)
-        y = tile>>17
-        saveMatrixAsPNG(zoom, x, y, matrices[tile])
-       # if not os.path.exists("map/"+str(zoom)+"/"+str(x)):
-       #     os.mkdir("map/"+str(zoom)+"/"+str(x))
-       # w = png.Writer(size=(256,256), greyscale=True, bitdepth = 2)            
-       # rows = w.array_scanlines(matrices[tile])
-       # f = open("map/"+str(zoom)+"/"+str(x)+"/"+str(y)+".png", "wb")
-       # w.write(f, rows)
-       # f.close()
-
+    cdf = []            
     for zlevel in range(1, zoommax - zoommin +1):
         zoom = zoommax - zlevel
         if not os.path.exists("map/"+str(zoom)):
             os.mkdir("map/"+str(zoom))
         zoommatrices = zoomOut(zoom, matrices)
+        cdf = normalize(matrices)
+        for matrix in matrices:
+            x = matrix%(2<<(zoom+1))
+            y = matrix>>(zoom+2)
+            saveMatrixAsPNG(zoom+1, x, y, cdf, matrices[matrix]) 
+
         matrices = zoommatrices.copy()
+    
+    for matrix in matrices:
+        x = matrix%(2<<(zoom))
+        y = matrix>>(zoom+1)
+        saveMatrixAsPNG(zoom, x, y, cdf, matrices[matrix])
 
 if __name__ == "__main__":
     main()
