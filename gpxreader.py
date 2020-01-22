@@ -250,19 +250,31 @@ def zoomOut(zoom, matrices):
         yrow += 2
     return zoommatrices
 
-# TODO: check cdf for duplicate numbers (1 number spans multiple percentile bins) and smartly adjust color, right now just chooses color at far right edge of percentile
 def makePalette(cdf, bd):
     bg = (30, 30, 30)
     low = (60, 30, 155)
     high = (130, 240, 255)
     palette = [bg]
-    rstep = int((high[0]-low[0])/(len(cdf)-3))
-    gstep = int((high[1]-low[1])/(len(cdf)-3))
-    bstep = int((high[2]-low[2])/(len(cdf)-3))
+    rstep = int((high[0]-low[0])/(len(cdf)-2))
+    gstep = int((high[1]-low[1])/(len(cdf)-2))
+    bstep = int((high[2]-low[2])/(len(cdf)-2))
+    dupcount = 1
     for i in range(0, len(cdf)-2):
-        palette.append((low[0]+i*rstep, low[1]+i*gstep, low[2]+i*bstep))
+        if(cdf[i+1] == cdf[i+2]):
+            dupcount+=1
+        else:
+            #print(i, dupcount)
+            if(dupcount >1):
+                n = i-dupcount+1
+                dupstep = (i*(i+1) - n*(n+1))/(2.0*dupcount)
+                for dup in range(i-dupcount, i):
+                    palette.append((int(low[0]+dupstep*rstep), int(low[1]+dupstep*gstep), int(low[2]+dupstep*bstep)))
+            else:
+                palette.append((int(low[0]+i*rstep), int(low[1]+i*gstep), int(low[2]+i*bstep)))
+            dupcount = 1
     for j in range(len(palette), 1<<bd):
         palette.append(high)
+    #print(palette)
     return palette
 
 def saveMatrixAsPNG(zoom, x, y, cdf, matrix):
@@ -371,17 +383,14 @@ def main():
             os.mkdir("map/"+str(zoom))
         zoommatrices = zoomOut(zoom, matrices)
         cdf = normalize(matrices)
-        test = 0
         for matrix in matrices:
-            if(test == 0 and zoom == 12):
-                #print(matrices[matrix])
-                test+=1
             x = matrix%(2<<(zoom+1))
             y = matrix>>(zoom+2)
             saveMatrixAsPNG(zoom+1, x, y, cdf, matrices[matrix]) 
 
         matrices = zoommatrices.copy()
     
+    cdf = normalize(matrices)
     for matrix in matrices:
         x = matrix%(2<<(zoom))
         y = matrix>>(zoom+1)
