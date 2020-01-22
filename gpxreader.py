@@ -260,13 +260,12 @@ def makePalette(cdf, bd):
     bstep = int((high[2]-low[2])/(len(cdf)-2))
     dupcount = 1
     for i in range(0, len(cdf)-2):
-        if(cdf[i+1] == cdf[i+2]):
+        if(cdf[i+1] == cdf[i+2]): #check if 1 value covers more than one decile bin 
             dupcount+=1
         else:
-            #print(i, dupcount)
-            if(dupcount >1):
+            if(dupcount >1):    #in case 1 value in cdf covers more than one decile bin i.e. there is a duplicated number in cdf
                 n = i-dupcount+1
-                dupstep = (i*(i+1) - n*(n+1))/(2.0*dupcount)
+                dupstep = (i*(i+1) - n*(n+1))/(2.0*dupcount) #calc average i value over the duplicated bins ('Sum of ints from k to n' = n(n+1)/2 - k(k+1)/2)
                 for dup in range(i-dupcount, i):
                     palette.append((int(low[0]+dupstep*rstep), int(low[1]+dupstep*gstep), int(low[2]+dupstep*bstep)))
             else:
