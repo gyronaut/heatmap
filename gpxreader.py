@@ -250,6 +250,7 @@ def zoomOut(zoom, matrices):
         yrow += 2
     return zoommatrices
 
+# TODO: check cdf for duplicate numbers (1 number spans multiple percentile bins) and smartly adjust color, right now just chooses color at far right edge of percentile
 def makePalette(cdf, bd):
     bg = (30, 30, 30)
     low = (60, 30, 155)
@@ -260,7 +261,6 @@ def makePalette(cdf, bd):
     bstep = int((high[2]-low[2])/(len(cdf)-3))
     for i in range(0, len(cdf)-2):
         palette.append((low[0]+i*rstep, low[1]+i*gstep, low[2]+i*bstep))
-    #print(cdf)
     for j in range(len(palette), 1<<bd):
         palette.append(high)
     return palette
@@ -272,7 +272,7 @@ def saveMatrixAsPNG(zoom, x, y, cdf, matrix):
     #    bd=bd<<1
     #    numcolors = math.ceil(numcolors/2.0)
     p = makePalette(cdf, bd)
-    print(p[1], p[2], p[3])
+    #print(p[1], p[2], p[3])
     if not os.path.exists("map/"+str(zoom)+"/"+str(x)):
         os.mkdir("map/"+str(zoom)+"/"+str(x))
 
@@ -282,7 +282,6 @@ def saveMatrixAsPNG(zoom, x, y, cdf, matrix):
     w.write(f, rows)
     f.close()
 
-#TODO: normalize matrices with some sort of function (CDF?) to get better contrast between high and low heat points
 def calcCDF(matrices):
     numMat = 10
     if(numMat > len(matrices)):
@@ -302,24 +301,29 @@ def calcCDF(matrices):
         if(pt>99):
             pt=99
         histo[pt]+=1
+    print(histo) 
     cdf=[0]*100
-    cdfSteps = [0]*9
+    cdfSteps = [0]*20
     tot = 0
     for i in range(0,100):
         cdf[i] = (histo[i]+tot)/20000.0
         tot+=histo[i]
+    print(cdf)
     istep = 1
-    step = 0.1
-    offset = 0.0
+    offset = cdf[0]
+    step = (1.0-offset)/10.0
     for i in range(1,100):
-        if(cdf[i]>(offset+(istep*step))):
+        if(cdf[i]>=(offset+(istep*step))):
             cdfSteps[istep] = i
-            if(cdf[i]>step*2.0):
-                step = ((1.0-cdf[i])/float(10-istep))
-                offset = cdf[i]
-            istep+=1
-    trimmedCDFSteps = [0]*(istep-1)
-    for i in range(0, istep-1):
+            if(cdf[i]> offset+(step*(istep+1))):
+                skipsteps = int((cdf[i]-offset)/step)-istep
+                for j in range(1, skipsteps+1):
+                    cdfSteps[istep+j] = i
+                istep+= skipsteps
+            else:
+                istep+=1
+    trimmedCDFSteps = [0]*(istep)
+    for i in range(0, istep):
         trimmedCDFSteps[i] = cdfSteps[i]
     trimmedCDFSteps.append(999)
     return trimmedCDFSteps
@@ -327,12 +331,14 @@ def calcCDF(matrices):
 
 def normalize(matrices):
     cdf = calcCDF(matrices)
-    #print(cdf)
+    print(cdf)
     for matrix in matrices:
-        for px in matrices[matrix]:
-            for i in range(0, len(cdf)-1):
+        for ipx in range(0, len(matrices[matrix])):
+            px = matrices[matrix][ipx]
+            for i in range(0, len(cdf)-1):             
                 if (px > cdf[i] and px <= cdf[i+1]):
-                    px = i+1
+                    matrices[matrix][ipx] = i+1
+                    break
     return cdf
 
 def main():
@@ -365,7 +371,11 @@ def main():
             os.mkdir("map/"+str(zoom))
         zoommatrices = zoomOut(zoom, matrices)
         cdf = normalize(matrices)
+        test = 0
         for matrix in matrices:
+            if(test == 0 and zoom == 12):
+                #print(matrices[matrix])
+                test+=1
             x = matrix%(2<<(zoom+1))
             y = matrix>>(zoom+2)
             saveMatrixAsPNG(zoom+1, x, y, cdf, matrices[matrix]) 
