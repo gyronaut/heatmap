@@ -176,6 +176,7 @@ def tile2matrix(tile, segments, matrices):
         if length == 0:
             continue
         for ipt in range(0, length-1):
+            print(segment[ipt][0], segment[ipt][1])
             plot(segment[ipt][0], segment[ipt][1], mat)
             plotLine(segment[ipt][0], segment[ipt][1], segment[ipt+1][0], segment[ipt+1][1], mat)
         plot(segment[length-1][0], segment[length-1][1], mat)
@@ -305,21 +306,21 @@ def calcCDF(matrices):
         data = data + matrices[matrix]
         imat+=1
     data.sort(reverse = True)
-    histo = [0]*100
+    histo = [0]*300
     sample = random.sample(range(0, 256*256), 20000)
     for idx in sample:
         pt = data[idx]
         if(pt>99):
             pt=99
         histo[pt]+=1
-    print(histo) 
-    cdf=[0]*100
+    #print(histo) 
+    cdf=[0]*300
     cdfSteps = [0]*20
     tot = 0
-    for i in range(0,100):
+    for i in range(0,len(histo)):
         cdf[i] = (histo[i]+tot)/20000.0
         tot+=histo[i]
-    print(cdf)
+    #print(cdf)
     istep = 1
     offset = cdf[0]
     step = (1.0-offset)/10.0
@@ -342,7 +343,7 @@ def calcCDF(matrices):
 
 def normalize(matrices):
     cdf = calcCDF(matrices)
-    print(cdf)
+    #print(cdf)
     for matrix in matrices:
         for ipx in range(0, len(matrices[matrix])):
             px = matrices[matrix][ipx]
