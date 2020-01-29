@@ -16,21 +16,22 @@ import fnmatch
 # as seen here: https://forums.garmin.com/apps-software/mobile-apps-web/f/garmin-connect-web/63103/show-all-routes-on-the-same-map/930931#930931
 
 # tiles covering relavant portion of Austin (Zoom 11): Google - (467, 842), (468, 842), (467, 843), (468, 843)  ;  TSM - (467, 1205), (468, 1205), (467, 1204), (468, 1204)
+
 def coord2px(lat, lon, zoom):
     x = 256.0/(2.0*math.pi)*(2**zoom)*((lon)*math.pi/180.0 + math.pi)
     y = 256.0/(2.0*math.pi)*(2**zoom)*(math.pi - math.log(math.tan(math.pi/4.0 + (lat*math.pi/180.0)/2.0)))
     return [int(x),int(y)]
 
-# everytime a track crosses to a new tile, need to add two midpoints that connect each tile's segment to the tile edge
-def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum):
+#TODO: look into small missing line segments (for example, check activity that went manor to airport blvd, couple small missing parts (single pixel missing?))
+def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum, tiles):
     a = segment[0]
     b = oldsegment[len(oldsegment)-1]
     deltilex = (tilenum%(2<<16)) - (oldtilenum%(2<<16))
     deltiley = (tilenum >> 17) - (oldtilenum >> 17)
     delx = a[0]-(b[0] - 256*deltilex)
     dely = a[1]-(b[1] - 256*deltiley)
-    mida = []
-    midb = []
+    mida = [0,0]
+    midb = [0,0]
     if delx==0:
         mida = [a[0], round(float(a[1])/255.0)*255]
         midb = [b[0], round(float(b[1])/255.0)*255]
@@ -39,20 +40,67 @@ def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum):
         midb = [round(float(b[0])/255.0)*255, b[1]]
     else:    
         m = float(dely)/float(delx)
-        if deltilex!=0:
+        if deltiley==0:
             midax = round(float(a[0])/255.0)*255
-            miday = math.ceil(a[1] - m*(a[0]-midax))
+            miday = round(a[1] - m*(a[0]-midax))
             midbx = round(float(b[0])/255.0)*255
-            midby = math.ceil(b[1] + m*(midbx - b[0]))
+            midby = round(b[1] + m*(midbx - b[0]))
+            mida = [midax, miday]
+            midb = [midbx, midby]
+        elif deltilex==0:
+            miday = round(float(a[1])/255.0)*255
+            midax = round(a[0] - (a[1]-miday)/m)
+            midby = round(float(b[1])/255.0)*255
+            midbx = round(b[0] + (midby - b[1])/m)
             mida = [midax, miday]
             midb = [midbx, midby]
         else:
-            miday = round(float(a[1])/255.0)*255
-            midax = math.ceil(a[0] - (a[1]-miday)/m)
-            midby = round(float(b[1])/255.0)*255
-            midbx = math.ceil(b[0] + (midby - b[1])/m)
-            mida = [midax, miday]
-            midb = [midbx, midby]
+            if((a[0]-(round(float(a[0])/255.0)*255.0))*dely > (a[1]-round(float(a[1])/255.0)*255)*delx):
+                intertilex = tilenum%(2<<16)
+                intertiley = (tilenum >> 17) - deltiley
+                intertilenum = (intertiley << 17) + intertilex
+                mida[1] = round(float(a[1])/255.0)*255
+                mida[0] = round(a[0] - (a[1]-mida[1])/m)
+                midb[0] = round(float(b[0])/255.0)*255
+                midb[1] = round(b[1] + m*(midb[0] - b[0]))
+
+                midc = [math.floor(mida[0] - 1.0/m), abs(mida[1]-255)]
+                midd = [abs(midb[0]-255), math.floor(midb[1]+m)]
+                intersegment = [midc, midd]
+                print(intersegment, intertilex, intertiley, "test")
+                if intertilenum in tiles:
+                    tiles[intertilenum].append(intersegment)
+                else:
+                    tiles[intertilenum] = [[]]
+                    tiles[intertilenum].append(intersegment)
+        
+            elif((a[0]-(round(float(a[0])/255.0)*255.0)*dely) < (a[1]-round(float(a[1])/255.0)*255)*delx):
+                intertilex = tilenum%(2<<16) - deltiley
+                intertiley = (tilenum >> 17)
+                intertilenum = (intertiley << 17) + intertilex
+                mida[0] = round(float(a[0])/255.0)*255
+                mida[1] = round(a[1] - m*(a[0]-mida[0]))
+                midb[1] = round(float(b[1])/255.0)*255
+                midb[0] = round(b[0] + (midb[1] - b[1])/m)
+
+                midc = [abs(mida[0] - 255), math.floor(mida[1] - m)]
+                midd = [math.floor(midb[0]+1.0/m), abs(midb[1]-255)]
+                intersegment = [midc, midd]
+                print(intersegment, intertilex, intertiley, intertilenum)
+                if intertilenum in tiles:
+                    tiles[intertilenum].append(intersegment)
+                else:
+                    tiles[intertilenum] = [[]]
+                    tiles[intertilenum].append(intersegment)
+
+            else:
+                mida = [round(float(a[0])/255.0)*255, round(float(a[1])/255.0)*255]
+                midb = [round(float(b[0])/255.0)*255, round(float(b[1])/255.0)*255]
+
+    if(deltilex!=0 and deltiley!=0):
+        print("uh oh...")
+        print(a, mida, b, midb)
+
     if(b[0]%255 != 0 and b[1]%255 != 0):
         oldsegment.append(midb)
     if(a[0]%255 != 0 and a[1]%255 != 0):
@@ -88,7 +136,7 @@ def parseGPX(gpxfile, zoom, tiles):
             oldpoints = points.copy()
             points = [pxpt]
             if oldtilenum != 0:
-                addBoundaryPoints(points, tilenum, oldpoints, oldtilenum) #adding new points that connect each segment to the edge of their tile
+                addBoundaryPoints(points, tilenum, oldpoints, oldtilenum, tiles) #adding new points that connect each segment to the edge of their tile
                 if oldtilenum in list(tiles):
                     tiles[oldtilenum].append(oldpoints)
                 else:
@@ -176,8 +224,10 @@ def tile2matrix(tile, segments, matrices):
         if length == 0:
             continue
         for ipt in range(0, length-1):
-            print(segment[ipt][0], segment[ipt][1])
-            plot(segment[ipt][0], segment[ipt][1], mat)
+            try:
+                plot(segment[ipt][0], segment[ipt][1], mat)
+            except:
+                print("broke at line segment:", segment, tile, segments)
             plotLine(segment[ipt][0], segment[ipt][1], segment[ipt+1][0], segment[ipt+1][1], mat)
         plot(segment[length-1][0], segment[length-1][1], mat)
     matrices[tile] = mat
@@ -252,9 +302,10 @@ def zoomOut(zoom, matrices):
     return zoommatrices
 
 def makePalette(cdf, bd):
-    bg = (30, 30, 30)
-    low = (60, 30, 155)
-    high = (130, 240, 255)
+    alpha = 200
+    bg = (30, 30, 30, alpha)
+    low = (60, 30, 155, alpha)
+    high = (130, 240, 255, alpha)
     palette = [bg]
     rstep = int((high[0]-low[0])/(len(cdf)-2))
     gstep = int((high[1]-low[1])/(len(cdf)-2))
@@ -268,9 +319,9 @@ def makePalette(cdf, bd):
                 n = i-dupcount+1
                 dupstep = (i*(i+1) - n*(n+1))/(2.0*dupcount) #calc average i value over the duplicated bins ('Sum of ints from k to n' = n(n+1)/2 - k(k+1)/2)
                 for dup in range(i-dupcount, i):
-                    palette.append((int(low[0]+dupstep*rstep), int(low[1]+dupstep*gstep), int(low[2]+dupstep*bstep)))
+                    palette.append((int(low[0]+dupstep*rstep), int(low[1]+dupstep*gstep), int(low[2]+dupstep*bstep), alpha))
             else:
-                palette.append((int(low[0]+i*rstep), int(low[1]+i*gstep), int(low[2]+i*bstep)))
+                palette.append((int(low[0]+i*rstep), int(low[1]+i*gstep), int(low[2]+i*bstep), alpha))
             dupcount = 1
     for j in range(len(palette), 1<<bd):
         palette.append(high)

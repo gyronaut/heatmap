@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+	
+	<title>Quick Start - Leaflet</title>
+
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.6.0/dist/leaflet.css" integrity="sha512-xwE/Az9zrjBIphAcBb3F6JVqxf46+CDLwfLMHloNu6KEQCAWi6HcDUbeOfBIptF7tcCzusKFjFw2yuvEpDL9wQ==" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.6.0/dist/leaflet.js" integrity="sha512-gZwIG9x3wUXg2hdXF6+rVkLF/0Vi9U8D2Ntg4Ga5I5BZpVkVxlJWbSQtXPSiUTtC0TjtGOmxa1AJPuV0CPthew==" crossorigin=""></script>
+
+
+	
+</head>
+<body>
+
+
+
+<div id="mapid" style="width: 600px; height: 600px; background:#1e1e1e"></div>
+<script>
+
+	
+	var heatLayer = L.tileLayer('map/{z}/{x}/{y}.png', {
+		maxZoom: 16,
+        minZoom: 12,
+        zoomSnap: 0,
+		id: 'heatmap'
+	})
+    
+    var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.se/hydda/full/{z}/{x}/{y}.png', {
+	maxZoom: 16,
+    minZoom: 12,
+	attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    id: 'openstreetmap'
+    })
+
+    var layergroup = L.layerGroup([osmLayer, heatLayer])
+
+    var mymap = L.map('mapid',{
+        layers: [layergroup, heatLayer]
+        }).setView([30.29849, -97.73574652], 15);
+
+        var layers = {
+        "Heatmap": heatLayer,
+        "OSM Map + Heatmap": layergroup
+    };
+
+    L.control.layers(layers).addTo(mymap)
+
+</script>
+
+
+
+</body>
+</html>
