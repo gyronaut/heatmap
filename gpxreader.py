@@ -22,7 +22,7 @@ def coord2px(lat, lon, zoom):
     y = 256.0/(2.0*math.pi)*(2**zoom)*(math.pi - math.log(math.tan(math.pi/4.0 + (lat*math.pi/180.0)/2.0)))
     return [int(x),int(y)]
 
-#TODO: look into small missing line segments (for example, check activity that went manor to airport blvd, couple small missing parts (single pixel missing?))
+#TODO: look into small missing line segments (for example, check activity that went manor to airport blvd, couple small missing parts (single pixel missing?)) --> missing pixel is happening durng addBoundaryPoints when one of the points is already on the boundary E.G. if a is on the x boundary of a tile, pixel [ax,ay-1] might be included in the line from a to b, but would not be added as a boundary point
 def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum, tiles):
     a = segment[0]
     b = oldsegment[len(oldsegment)-1]
@@ -64,10 +64,10 @@ def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum, tiles):
                 midb[0] = round(float(b[0])/255.0)*255
                 midb[1] = round(b[1] + m*(midb[0] - b[0]))
 
-                midc = [math.floor(mida[0] - 1.0/m), abs(mida[1]-255)]
+                midc = [math.ceil(mida[0] - 1.0/m), abs(mida[1]-255)]
                 midd = [abs(midb[0]-255), math.floor(midb[1]+m)]
                 intersegment = [midc, midd]
-                print(intersegment, intertilex, intertiley, "test")
+                #print(intersegment, intertilex, intertiley, "test")
                 if intertilenum in tiles:
                     tiles[intertilenum].append(intersegment)
                 else:
@@ -86,7 +86,7 @@ def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum, tiles):
                 midc = [abs(mida[0] - 255), math.floor(mida[1] - m)]
                 midd = [math.floor(midb[0]+1.0/m), abs(midb[1]-255)]
                 intersegment = [midc, midd]
-                print(intersegment, intertilex, intertiley, intertilenum)
+                #print(intersegment, intertilex, intertiley, intertilenum)
                 if intertilenum in tiles:
                     tiles[intertilenum].append(intersegment)
                 else:
@@ -97,14 +97,13 @@ def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum, tiles):
                 mida = [round(float(a[0])/255.0)*255, round(float(a[1])/255.0)*255]
                 midb = [round(float(b[0])/255.0)*255, round(float(b[1])/255.0)*255]
 
-    if(deltilex!=0 and deltiley!=0):
-        print("uh oh...")
-        print(a, mida, b, midb)
-
     if(b[0]%255 != 0 and b[1]%255 != 0):
         oldsegment.append(midb)
     if(a[0]%255 != 0 and a[1]%255 != 0):
         segment.insert(0, mida)
+
+    if(oldtilenum == (26978<<17)+14981):
+        print(a, mida, b, midb)
 
 # TODO: filter out points that are too close together (i.e. don't append point thats the same as previous point)
 

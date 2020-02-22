@@ -13,11 +13,14 @@
 
 	
 </head>
-<body>
+<body style="height: 100%">
 
 
-
-<div id="mapid" style="width: 600px; height: 600px; background:#1e1e1e"></div>
+<div id="mapid" style="width: 99%; height: 95vh; margin: auto; background:#1e1e1e; padding: 1vh"></div>
+<div id="controller" style="width: 100px; height: 150px; top: 40vh; left: 20px; position: absolute; z-index: 999; background: #ffffff">
+    <button id="heatbutton" onclick="toggleHeatmap();" style="padding: 25px; background-color: #8a8a8a">Heatmap Overlay</button>
+    <button id="mapbutton" onclick="toggleMap();" style="padding: 25px; background-color: #dbdbdb">Street Map</button>
+</div>
 <script>
 
 	
@@ -38,15 +41,48 @@
     var layergroup = L.layerGroup([osmLayer, heatLayer])
 
     var mymap = L.map('mapid',{
-        layers: [layergroup, heatLayer]
+        layers: [heatLayer]
         }).setView([30.29849, -97.73574652], 15);
 
-        var layers = {
+    var layers = {
         "Heatmap": heatLayer,
-        "OSM Map + Heatmap": layergroup
+        "OSM Map": osmLayer
+    };
+    
+    
+    var heattoggle = true;
+    var maptoggle = false;
+
+    //var ctrllayers = L.control.layers(layers).addTo(mymap);
+    L.control.scale().addTo(mymap);
+    
+
+    function toggleHeatmap(){
+        if(heattoggle){
+            mymap.removeLayer(heatLayer);
+            document.getElementById('heatbutton').style.backgroundColor = "#dbdbdb";
+        }else{
+            mymap.addLayer(heatLayer);
+            heatLayer.bringToFront();
+            document.getElementById('heatbutton').style.backgroundColor = "#8a8a8a";
+        }
+        heattoggle = !heattoggle;
     };
 
-    L.control.layers(layers).addTo(mymap)
+    function toggleMap(){
+        if(maptoggle){
+            mymap.removeLayer(osmLayer);
+            document.getElementById('mapbutton').style.backgroundColor = "#dbdbdb";
+        }else{
+            mymap.addLayer(osmLayer);
+            if(heattoggle){
+                heatLayer.bringToFront();
+            }
+            document.getElementById('mapbutton').style.backgroundColor = "#8a8a8a";
+        }
+        maptoggle = !maptoggle;
+    };
+
 
 </script>
 
