@@ -17,434 +17,440 @@ import fnmatch
 
 # tiles covering relavant portion of Austin (Zoom 11): Google - (467, 842), (468, 842), (467, 843), (468, 843)  ;  TSM - (467, 1205), (468, 1205), (467, 1204), (468, 1204)
 
-def coord2px(lat, lon, zoom):
-    x = 256.0/(2.0*math.pi)*(2**zoom)*((lon)*math.pi/180.0 + math.pi)
-    y = 256.0/(2.0*math.pi)*(2**zoom)*(math.pi - math.log(math.tan(math.pi/4.0 + (lat*math.pi/180.0)/2.0)))
-    return [int(x),int(y)]
+class RunData():
+    def __init__(self, zoom):
+        self.zoom = zoom;
+        self.datachunks = {}
 
-#TODO: look into small missing line segments (for example, check activity that went manor to airport blvd, couple small missing parts (single pixel missing?)) --> missing pixel is happening durng addBoundaryPoints when one of the points is already on the boundary E.G. if a is on the x boundary of a tile, pixel [ax,ay-1] might be included in the line from a to b, but would not be added as a boundary point
-def addBoundaryPoints(segment, tilenum, oldsegment, oldtilenum, tiles):
-    a = segment[0]
-    b = oldsegment[len(oldsegment)-1]
-    deltilex = (tilenum%(2<<16)) - (oldtilenum%(2<<16))
-    deltiley = (tilenum >> 17) - (oldtilenum >> 17)
-    delx = a[0]-(b[0] - 256*deltilex)
-    dely = a[1]-(b[1] - 256*deltiley)
-    mida = [0,0]
-    midb = [0,0]
-    if delx==0:
-        mida = [a[0], round(float(a[1])/255.0)*255]
-        midb = [b[0], round(float(b[1])/255.0)*255]
-    elif dely==0:
-        mida = [round(float(a[0])/255.0)*255, a[1]]
-        midb = [round(float(b[0])/255.0)*255, b[1]]
-    else:    
-        m = float(dely)/float(delx)
-        if deltiley==0:
-            midax = round(float(a[0])/255.0)*255
-            miday = round(a[1] - m*(a[0]-midax))
-            midbx = round(float(b[0])/255.0)*255
-            midby = round(b[1] + m*(midbx - b[0]))
-            mida = [midax, miday]
-            midb = [midbx, midby]
-        elif deltilex==0:
-            miday = round(float(a[1])/255.0)*255
-            midax = round(a[0] - (a[1]-miday)/m)
-            midby = round(float(b[1])/255.0)*255
-            midbx = round(b[0] + (midby - b[1])/m)
-            mida = [midax, miday]
-            midb = [midbx, midby]
-        else:
-            if((a[0]-(round(float(a[0])/255.0)*255.0))*dely > (a[1]-round(float(a[1])/255.0)*255)*delx):
-                intertilex = tilenum%(2<<16)
-                intertiley = (tilenum >> 17) - deltiley
-                intertilenum = (intertiley << 17) + intertilex
-                mida[1] = round(float(a[1])/255.0)*255
-                mida[0] = round(a[0] - (a[1]-mida[1])/m)
-                midb[0] = round(float(b[0])/255.0)*255
-                midb[1] = round(b[1] + m*(midb[0] - b[0]))
-
-                midc = [math.ceil(mida[0] - 1.0/m), abs(mida[1]-255)]
-                midd = [abs(midb[0]-255), math.floor(midb[1]+m)]
-                intersegment = [midc, midd]
-                #print(intersegment, intertilex, intertiley, "test")
-                if intertilenum in tiles:
-                    tiles[intertilenum].append(intersegment)
-                else:
-                    tiles[intertilenum] = [[]]
-                    tiles[intertilenum].append(intersegment)
-        
-            elif((a[0]-(round(float(a[0])/255.0)*255.0)*dely) < (a[1]-round(float(a[1])/255.0)*255)*delx):
-                intertilex = tilenum%(2<<16) - deltiley
-                intertiley = (tilenum >> 17)
-                intertilenum = (intertiley << 17) + intertilex
-                mida[0] = round(float(a[0])/255.0)*255
-                mida[1] = round(a[1] - m*(a[0]-mida[0]))
-                midb[1] = round(float(b[1])/255.0)*255
-                midb[0] = round(b[0] + (midb[1] - b[1])/m)
-
-                midc = [abs(mida[0] - 255), math.floor(mida[1] - m)]
-                midd = [math.floor(midb[0]+1.0/m), abs(midb[1]-255)]
-                intersegment = [midc, midd]
-                #print(intersegment, intertilex, intertiley, intertilenum)
-                if intertilenum in tiles:
-                    tiles[intertilenum].append(intersegment)
-                else:
-                    tiles[intertilenum] = [[]]
-                    tiles[intertilenum].append(intersegment)
-
+    def coord2px(self, lat, lon):
+        x = 256.0/(2.0*math.pi)*(2**self.zoom)*((lon)*math.pi/180.0 + math.pi)
+        y = 256.0/(2.0*math.pi)*(2**self.zoom)*(math.pi - math.log(math.tan(math.pi/4.0 + (lat*math.pi/180.0)/2.0)))
+        return [int(x),int(y)]
+    
+    #TODO: look into small missing line segments (for example, check activity that went manor to airport blvd, couple small missing parts (single pixel missing?)) --> missing pixel is happening durng addBoundaryPoints when one of the points is already on the boundary E.G. if a is on the x boundary of a tile, pixel [ax,ay-1] might be included in the line from a to b, but would not be added as a boundary point
+    def _addBoundaryPoints(self, segment, tilenum, oldsegment, oldtilenum):
+        a = segment[0]
+        b = oldsegment[len(oldsegment)-1]
+        deltilex = (tilenum%(2<<16)) - (oldtilenum%(2<<16))
+        deltiley = (tilenum >> 17) - (oldtilenum >> 17)
+        delx = a[0]-(b[0] - 256*deltilex)
+        dely = a[1]-(b[1] - 256*deltiley)
+        mida = [0,0]
+        midb = [0,0]
+        if delx==0:
+            mida = [a[0], round(float(a[1])/255.0)*255]
+            midb = [b[0], round(float(b[1])/255.0)*255]
+        elif dely==0:
+            mida = [round(float(a[0])/255.0)*255, a[1]]
+            midb = [round(float(b[0])/255.0)*255, b[1]]
+        else:    
+            m = float(dely)/float(delx)
+            if deltiley==0:
+                midax = round(float(a[0])/255.0)*255
+                miday = round(a[1] - m*(a[0]-midax))
+                midbx = round(float(b[0])/255.0)*255
+                midby = round(b[1] + m*(midbx - b[0]))
+                mida = [midax, miday]
+                midb = [midbx, midby]
+            elif deltilex==0:
+                miday = round(float(a[1])/255.0)*255
+                midax = round(a[0] - (a[1]-miday)/m)
+                midby = round(float(b[1])/255.0)*255
+                midbx = round(b[0] + (midby - b[1])/m)
+                mida = [midax, miday]
+                midb = [midbx, midby]
             else:
-                mida = [round(float(a[0])/255.0)*255, round(float(a[1])/255.0)*255]
-                midb = [round(float(b[0])/255.0)*255, round(float(b[1])/255.0)*255]
+                if((a[0]-(round(float(a[0])/255.0)*255.0))*dely > (a[1]-round(float(a[1])/255.0)*255)*delx):
+                    intertilex = tilenum%(2<<16)
+                    intertiley = (tilenum >> 17) - deltiley
+                    intertilenum = (intertiley << 17) + intertilex
+                    mida[1] = round(float(a[1])/255.0)*255
+                    mida[0] = round(a[0] - (a[1]-mida[1])/m)
+                    midb[0] = round(float(b[0])/255.0)*255
+                    midb[1] = round(b[1] + m*(midb[0] - b[0]))
 
-    if(b[0]%255 != 0 and b[1]%255 != 0):
-        oldsegment.append(midb)
-    if(a[0]%255 != 0 and a[1]%255 != 0):
-        segment.insert(0, mida)
+                    midc = [math.ceil(mida[0] - 1.0/m), abs(mida[1]-255)]
+                    midd = [abs(midb[0]-255), math.floor(midb[1]+m)]
+                    intersegment = [midc, midd]
+                    #print(intersegment, intertilex, intertiley, "test")
+                    if intertilenum in self.datachunks:
+                        self.datachunks[intertilenum].append(intersegment)
+                    else:
+                        self.datachunks[intertilenum] = [[]]
+                        self.datachunks[intertilenum].append(intersegment)
+            
+                elif((a[0]-(round(float(a[0])/255.0)*255.0)*dely) < (a[1]-round(float(a[1])/255.0)*255)*delx):
+                    intertilex = tilenum%(2<<16) - deltiley
+                    intertiley = (tilenum >> 17)
+                    intertilenum = (intertiley << 17) + intertilex
+                    mida[0] = round(float(a[0])/255.0)*255
+                    mida[1] = round(a[1] - m*(a[0]-mida[0]))
+                    midb[1] = round(float(b[1])/255.0)*255
+                    midb[0] = round(b[0] + (midb[1] - b[1])/m)
 
-    if(oldtilenum == (26978<<17)+14981):
-        print(a, mida, b, midb)
+                    midc = [abs(mida[0] - 255), math.floor(mida[1] - m)]
+                    midd = [math.floor(midb[0]+1.0/m), abs(midb[1]-255)]
+                    intersegment = [midc, midd]
+                    #print(intersegment, intertilex, intertiley, intertilenum)
+                    if intertilenum in self.datachunks:
+                        self.datachunks[intertilenum].append(intersegment)
+                    else:
+                        self.datachunks[intertilenum] = [[]]
+                        self.datachunks[intertilenum].append(intersegment)
 
-# TODO: filter out points that are too close together (i.e. don't append point thats the same as previous point)
-
-# each track segment needs a tile x,y, then a list of points that go from the boundary of the tile to the end point/another tile boundary, need separate storage element for each track segment (need new elem everytime a boundary is crossed)
-def parseGPX(gpxfile, zoom, tiles):
-    ns = {'url': 'http://www.topografix.com/GPX/1/1'} #namespace for gpx file format
-    tree = eltree.parse(gpxfile)
-    root = tree.getroot()
-    oldtilex = 0
-    oldtiley = 0
-    oldtilenum = 0;
-    segments = []
-    points = []
-    oldsegment = {}
-    oldpxpt = [-1, -1]
-    for trkpt in root.findall("./url:trk/url:trkseg/url:trkpt", ns):
-        lat = float(trkpt.get('lat'))
-        lon = float(trkpt.get('lon'))
-        pxpt = coord2px(lat, lon, zoom) #convert lat and lon to web mercator pixels at given zoom level
-        tilex = int(math.floor(pxpt[0]/256))
-        tiley = int(math.floor(pxpt[1]/256))
-        tilenum = (tiley << (zoom+1)) + tilex
-        pxpt[0] = pxpt[0]%256
-        pxpt[1] = pxpt[1]%256
-        
-        if (oldpxpt[0]==pxpt[0] and oldpxpt[1]==pxpt[1]): #check that next point isn't identical to last point
-            continue
-        if (tilenum != oldtilenum): #check if tile boundary was crossed
-            oldpoints = points.copy()
-            points = [pxpt]
-            if oldtilenum != 0:
-                addBoundaryPoints(points, tilenum, oldpoints, oldtilenum, tiles) #adding new points that connect each segment to the edge of their tile
-                if oldtilenum in list(tiles):
-                    tiles[oldtilenum].append(oldpoints)
                 else:
-                    tiles[oldtilenum] = [[]]
-                    tiles[oldtilenum].append(oldpoints)
+                    mida = [round(float(a[0])/255.0)*255, round(float(a[1])/255.0)*255]
+                    midb = [round(float(b[0])/255.0)*255, round(float(b[1])/255.0)*255]
+
+        if(b[0]%255 != 0 and b[1]%255 != 0):
+            oldsegment.append(midb)
+        if(a[0]%255 != 0 and a[1]%255 != 0):
+            segment.insert(0, mida)
+
+    def readInGPX(self, gpxfile):
+        ns = {'url': 'http://www.topografix.com/GPX/1/1'} #namespace for gpx file format
+        tree = eltree.parse(gpxfile)
+        root = tree.getroot()
+        oldtilex = 0
+        oldtiley = 0
+        oldtilenum = 0;
+        segments = []
+        points = []
+        oldsegment = {}
+        oldpxpt = [-1, -1]
+        for trkpt in root.findall("./url:trk/url:trkseg/url:trkpt", ns):
+            lat = float(trkpt.get('lat'))
+            lon = float(trkpt.get('lon'))
+            pxpt = self.coord2px(lat, lon) #convert lat and lon to web mercator pixels at given zoom level
+            tilex = int(math.floor(pxpt[0]/256))
+            tiley = int(math.floor(pxpt[1]/256))
+            tilenum = (tiley << (self.zoom+1)) + tilex
+            pxpt[0] = pxpt[0]%256
+            pxpt[1] = pxpt[1]%256
+        
+            if (oldpxpt[0]==pxpt[0] and oldpxpt[1]==pxpt[1]): #check that next point isn't identical to last point
+                continue
+            if (tilenum != oldtilenum): #check if tile boundary was crossed
+                oldpoints = points.copy()
+                points = [pxpt]
+                if oldtilenum != 0:
+                    self._addBoundaryPoints(points, tilenum, oldpoints, oldtilenum) #adding new points that connect each segment to the edge of their tile
+                    if oldtilenum in self.datachunks:
+                        self.datachunks[oldtilenum].append(oldpoints)
+                    else:
+                        self.datachunks[oldtilenum] = [[]]
+                        self.datachunks[oldtilenum].append(oldpoints)
+            else:
+                 points.append(pxpt) 
+    
+            oldtilex = tilex
+            oldtiley = tiley
+            oldtilenum = tilenum
+            oldpxpt = pxpt
+
+        if oldtilenum in self.datachunks:
+            self.datachunks[oldtilenum].append(points)
         else:
-             points.append(pxpt) 
+            self.datachunks[oldtilenum] = [[]]
+            self.datachunks[oldtilenum].append(points)
 
-        oldtilex = tilex
-        oldtiley = tiley
-        oldtilenum = tilenum
-        oldpxpt = pxpt
 
-    if oldtilenum in list(tiles):
-        tiles[oldtilenum].append(points)
-    else:
-        tiles[oldtilenum] = [[]]
-        tiles[oldtilenum].append(points)
 
-def plot(x, y, mat):
-    mat[x+(256*y)]+=1
+class TileSet():
 
-def plotLineLow(x0, y0, x1, y1, mat):
-    dx = x1-x0
-    dy = y1-y0
-    ystep = 1
-    if(dy < 0):
-        ystep = -1
-        dy = -dy
-    D = (dy<<1) -dx
-    y = y0
-    if(D > 0):
-        y = y + ystep
-        D = D-(dx<<1)
-    D = D + (dy<<1)
-    for x in range(x0+1, x1):
-        plot(x, y, mat)
+    def __init__(self, zoom):
+        self.zoom = zoom
+        self.tiles = {}
+        self.PDF = [0]*1000
+        self.CDF = [0]*1000
+        self.deciles = []
+        self.tilebounds = []
+
+    def copy(self):
+        dup = TileSet(self.zoom)
+        dup.tiles = self.tiles.copy()
+        dup.PDF = self.PDF.copy()
+        dup.CDF = self.CDF.copy()
+        dup.deciles = self.deciles.copy()
+        dup.tilebounds = self.tilebounds.copy()
+        return dup
+
+
+    def initFromRunData(self, data):
+        for tilenum in data.datachunks:
+             self.pts2matrix(tilenum, data.datachunks[tilenum])
+        self._calcPDF()
+        self._calcCDF()
+        self._calcDecileCutoffs()
+        self.getTileBounds()
+
+    def pts2matrix(self, tilenum, tiledata):
+        mat = [0]*256*256
+        for segment in tiledata:
+            length  = len(segment)
+            if length == 0:
+                continue
+            for ipt in range(0, length-1):
+                try:
+                    self.plot(segment[ipt][0], segment[ipt][1], mat)
+                except:
+                    print("broke at line segment:", segment, tile, tiledata)
+                self.plotLine(segment[ipt][0], segment[ipt][1], segment[ipt+1][0], segment[ipt+1][1], mat)
+            self.plot(segment[length-1][0], segment[length-1][1], mat)
+        self.tiles[tilenum] = mat
+    
+    def plotLine(self, x0, y0, x1, y1, mat):
+        dx = abs(x1-x0)
+        dy = abs(y1-y0)
+        sx = (1 if x1>x0 else -1)
+        sy = (1 if y1>y0 else -1)
+        if(dy < dx):
+            if(sx > 0):
+                self.plotLineLow(x0, y0, x1, y1, mat)
+            else:
+                self.plotLineLow(x1, y1, x0, y0, mat)
+        else:
+            if(sy > 0):
+                self.plotLineHigh(x0, y0, x1, y1, mat)
+            else:
+                self.plotLineHigh(x1, y1, x0, y0, mat)
+
+    def plot(self, x, y, mat):
+        mat[x+(256*y)]+=1
+
+    def plotLineLow(self, x0, y0, x1, y1, mat):
+        dx = x1-x0
+        dy = y1-y0
+        ystep = 1
+        if(dy < 0):
+            ystep = -1
+            dy = -dy
+        D = (dy<<1) -dx
+        y = y0
         if(D > 0):
             y = y + ystep
             D = D-(dx<<1)
         D = D + (dy<<1)
+        for x in range(x0+1, x1):
+            self.plot(x, y, mat)
+            if(D > 0):
+                y = y + ystep
+                D = D-(dx<<1)
+            D = D + (dy<<1)
 
 
-def plotLineHigh(x0, y0, x1, y1, mat):
-    dx = x1-x0
-    dy = y1-y0
-    xstep = 1
-    if(dx < 0):
-        xstep = -1
-        dx = -dx
-    D = (dx<<1) - dy
-    x = x0
-    if(D > 0):
-        x = x + xstep
-        D = D-(dy<<1)
-    D = D + (dx<<1)
-    for y in range(y0+1, y1):
-        plot(x, y, mat)
+    def plotLineHigh(self, x0, y0, x1, y1, mat):
+        dx = x1-x0
+        dy = y1-y0
+        xstep = 1
+        if(dx < 0):
+            xstep = -1
+            dx = -dx
+        D = (dx<<1) - dy
+        x = x0
         if(D > 0):
             x = x + xstep
             D = D-(dy<<1)
         D = D + (dx<<1)
+        for y in range(y0+1, y1):
+            self.plot(x, y, mat)
+            if(D > 0):
+                x = x + xstep
+                D = D-(dy<<1)
+            D = D + (dx<<1)
+
+    def _calcPDF(self):
+        numMat = 10
+        if(numMat > len(self.tiles)):
+            numMat = len(self.tiles)
+        data = []
+        imat = 0
+        for tile in self.tiles:
+            if (imat >= numMat):
+                break
+            data = data + self.tiles[tile]
+            imat+=1
+        data.sort(reverse = True)
+        self.PDF = [0]*1000
+        sample = random.sample(range(0, 256*256), 20000)
+        for idx in sample:
+            pt = data[idx]
+            if(pt>99):
+                pt=99
+            self.PDF[pt]+=1
 
 
-def plotLine(x0, y0, x1, y1, mat):
-    dx = abs(x1-x0)
-    dy = abs(y1-y0)
-    sx = (1 if x1>x0 else -1)
-    sy = (1 if y1>y0 else -1)
-    if(dy < dx):
-        if(sx > 0):
-            plotLineLow(x0, y0, x1, y1, mat)
-        else:
-            plotLineLow(x1, y1, x0, y0, mat)
-    else:
-        if(sy > 0):
-            plotLineHigh(x0, y0, x1, y1, mat)
-        else:
-            plotLineHigh(x1, y1, x0, y0, mat)
+    def _calcCDF(self):
+        tot = 0
+        for i in range(0,len(self.PDF)):
+            self.CDF[i] = (self.PDF[i]+tot)/20000.0
+            tot+=self.PDF[i]
 
-def tile2matrix(tile, segments, matrices):
-    mat = [0]*256*256
-    for segment in segments:
-        length  = len(segment)
-        if length == 0:
-            continue
-        for ipt in range(0, length-1):
-            try:
-                plot(segment[ipt][0], segment[ipt][1], mat)
-            except:
-                print("broke at line segment:", segment, tile, segments)
-            plotLine(segment[ipt][0], segment[ipt][1], segment[ipt+1][0], segment[ipt+1][1], mat)
-        plot(segment[length-1][0], segment[length-1][1], mat)
-    matrices[tile] = mat
+    def _calcDecileCutoffs(self):
+        cdfSteps = [0]*20
+        istep = 1
+        offset = self.CDF[0]
+        step = (1.0-offset)/10.0
+        for i in range(1,len(self.CDF)):
+            if(self.CDF[i]>=(offset+(istep*step))):
+                cdfSteps[istep] = i
+                if(self.CDF[i]> offset+(step*(istep+1))):
+                    skipsteps = int((self.CDF[i]-offset)/step)-istep
+                    for j in range(1, skipsteps+1):
+                        cdfSteps[istep+j] = i
+                    istep+= skipsteps
+                else:
+                    istep+=1
+        self.deciles = [0]*(istep)
+        for i in range(0, istep):
+            self.deciles[i] = cdfSteps[i]
+        self.deciles.append(999)
 
+    def normalize(self):
+        for tile in self.tiles:
+            for ipx in range(0, len(self.tiles[tile])):
+                px = self.tiles[tile][ipx]
+                for i in range(0, len(self.deciles)-1):             
+                    if (px > self.deciles[i] and px <= self.deciles[i+1]):
+                        self.tiles[tile][ipx] = i+1
+                        break
 
-def pyplotPoints(points):
-    xpts = []
-    ypts = []
-    for i in range(1, len(points)):
-        for pt in points[i]:
-            xpts.append(pt[0])
-            ypts.append(pt[1])
-    plt.scatter(xpts, ypts, s=None, c=None, marker='.')
-    plt.xlim(0, 256)
-    plt.ylim(256, 0)
-    plt.show()
+    def saveTileAsPNG(self, tilenum, p, bd):
+        x = tilenum%(2<<(self.zoom))
+        y = tilenum>>(self.zoom+1)
+        if not os.path.exists("map/"+str(self.zoom)+"/"+str(x)):
+            os.mkdir("map/"+str(self.zoom)+"/"+str(x))
 
-def getTileBounds(tiles, zoom):
-    xmin = 2<<zoom
-    xmax = -1
-    ymin = 2<<zoom
-    ymax = -1
-    for tile in tiles:
-        if(tile%(2<<zoom) > xmax):
-            xmax = tile%(2<<zoom)
-        if(tile%(2<<zoom) < xmin):
-            xmin = tile%(2<<zoom)
-        if(tile>>(zoom+1) > ymax):
-            ymax = tile>>(zoom+1)
-        if(tile>>(zoom+1) < ymin):
-            ymin = tile>>(zoom+1)
-    return (xmin, ymin, xmax, ymax)
-
-def zoomOutTile(zoom, tile, has_data, matrices, zoommatrices):
-    zmatrix = [0]*256*256
-    for i in range(0, 4):
-        if(has_data[i]):
-            mat = matrices[((tile[1]+(i>>1))<<(zoom+2))+(tile[0]+(i%2))]
-            for row in range(0, 128):
-                for col in range(0, 128):
-                    zrow = 128*(i>>1)+row
-                    zcol = 128*(i%2)+col
-                    zmatrix[(zrow<<8)+zcol] = mat[(row<<9)+(col<<1)]+mat[(row<<9)+(col<<1)+1]+mat[(row<<9) + 256 + (col<<1)]+mat[(row<<9)+256+(col<<1)+1]
-    zoommatrices[(tile[1]<<(zoom))+(tile[0]>>1)] = zmatrix
-
-def zoomOut(zoom, matrices):
-    zoommatrices = {}
-    #Get max and min tile x and tile y numbers to determine how many tiles at this zoom are needed
-    tilebounds = getTileBounds(list(matrices), zoom+1)
-    #starting at min y row, find all tiles 1 above or below and create tiles just for those that have at least 1 sub-tile filled
-    yrow = tilebounds[1]
-    print(tilebounds)
-    while(yrow < tilebounds[3]+2):
-        xcol = tilebounds[0]
-        while(xcol < tilebounds[2]+2):
-            has_data = [False, False, False, False]
-            y0 = yrow-(yrow%2)
-            y1 = y0+1
-            has_data[0+(xcol%2)] = ((y0<<zoom+2)+xcol in matrices)
-            has_data[2+(xcol%2)] = ((y1<<zoom+2)+xcol in matrices)
-            if(True in has_data):
-                #check 1 col right for tiles with data (only if x even)
-                if(xcol%2==0):
-                    has_data[1] = ((y0<<zoom+2)+xcol+1 in matrices)
-                    has_data[3] = ((y1<<zoom+2)+xcol+1 in matrices)
-                x0 = xcol -(xcol%2)
-                zoomOutTile(zoom, (x0, y0), has_data, matrices, zoommatrices)
-                xcol+=2-(xcol%2)
-            else:
-                xcol+=1
-        yrow += 2
-    return zoommatrices
-
-def makePalette(cdf, bd):
-    alpha = 200
-    bg = (30, 30, 30, alpha)
-    low = (60, 30, 155, alpha)
-    high = (130, 240, 255, alpha)
-    palette = [bg]
-    rstep = int((high[0]-low[0])/(len(cdf)-2))
-    gstep = int((high[1]-low[1])/(len(cdf)-2))
-    bstep = int((high[2]-low[2])/(len(cdf)-2))
-    dupcount = 1
-    for i in range(0, len(cdf)-2):
-        if(cdf[i+1] == cdf[i+2]): #check if 1 value covers more than one decile bin 
-            dupcount+=1
-        else:
-            if(dupcount >1):    #in case 1 value in cdf covers more than one decile bin i.e. there is a duplicated number in cdf
-                n = i-dupcount+1
-                dupstep = (i*(i+1) - n*(n+1))/(2.0*dupcount) #calc average i value over the duplicated bins ('Sum of ints from k to n' = n(n+1)/2 - k(k+1)/2)
-                for dup in range(i-dupcount, i):
-                    palette.append((int(low[0]+dupstep*rstep), int(low[1]+dupstep*gstep), int(low[2]+dupstep*bstep), alpha))
-            else:
-                palette.append((int(low[0]+i*rstep), int(low[1]+i*gstep), int(low[2]+i*bstep), alpha))
-            dupcount = 1
-    for j in range(len(palette), 1<<bd):
-        palette.append(high)
-    #print(palette)
-    return palette
-
-def saveMatrixAsPNG(zoom, x, y, cdf, matrix):
-    bd = 8
-    #numcolors = len(cdf)-1
-    #while(bd <= numcolors):
-    #    bd=bd<<1
-    #    numcolors = math.ceil(numcolors/2.0)
-    p = makePalette(cdf, bd)
-    #print(p[1], p[2], p[3])
-    if not os.path.exists("map/"+str(zoom)+"/"+str(x)):
-        os.mkdir("map/"+str(zoom)+"/"+str(x))
-
-    w = png.Writer(size=(256,256), palette = p, bitdepth = bd)            
-    rows = w.array_scanlines(matrix)
-    f = open("map/"+str(zoom)+"/"+str(x)+"/"+str(y)+".png", "wb")
-    w.write(f, rows)
-    f.close()
-
-def calcCDF(matrices):
-    numMat = 10
-    if(numMat > len(matrices)):
-        numMat = len(matrices)
-    data = []
-    imat = 0
-    for matrix in matrices:
-        if (imat >= numMat):
-            break
-        data = data + matrices[matrix]
-        imat+=1
-    data.sort(reverse = True)
-    histo = [0]*300
-    sample = random.sample(range(0, 256*256), 20000)
-    for idx in sample:
-        pt = data[idx]
-        if(pt>99):
-            pt=99
-        histo[pt]+=1
-    #print(histo) 
-    cdf=[0]*300
-    cdfSteps = [0]*20
-    tot = 0
-    for i in range(0,len(histo)):
-        cdf[i] = (histo[i]+tot)/20000.0
-        tot+=histo[i]
-    #print(cdf)
-    istep = 1
-    offset = cdf[0]
-    step = (1.0-offset)/10.0
-    for i in range(1,100):
-        if(cdf[i]>=(offset+(istep*step))):
-            cdfSteps[istep] = i
-            if(cdf[i]> offset+(step*(istep+1))):
-                skipsteps = int((cdf[i]-offset)/step)-istep
-                for j in range(1, skipsteps+1):
-                    cdfSteps[istep+j] = i
-                istep+= skipsteps
-            else:
-                istep+=1
-    trimmedCDFSteps = [0]*(istep)
-    for i in range(0, istep):
-        trimmedCDFSteps[i] = cdfSteps[i]
-    trimmedCDFSteps.append(999)
-    return trimmedCDFSteps
+        w = png.Writer(size=(256,256), palette = p, bitdepth = bd)            
+        rows = w.array_scanlines(self.tiles[tilenum])
+        f = open("map/"+str(self.zoom)+"/"+str(x)+"/"+str(y)+".png", "wb")
+        w.write(f, rows)
+        f.close()
     
+    def makeGradientPalette(self, bg, low, high, bd):
+        palette = [bg]
+        rstep = int((high[0]-low[0])/(len(self.deciles)-2))
+        gstep = int((high[1]-low[1])/(len(self.deciles)-2))
+        bstep = int((high[2]-low[2])/(len(self.deciles)-2))
+        dupcount = 1
+        for i in range(0, len(self.deciles)-2):
+            if(self.deciles[i+1] == self.deciles[i+2]): #check if 1 value covers more than one decile bin 
+                dupcount+=1
+            else:
+                if(dupcount >1):    #in case 1 value in cdf covers more than one decile bin i.e. there is a duplicated number in cdf
+                    n = i-dupcount+1
+                    dupstep = (i*(i+1) - n*(n+1))/(2.0*dupcount) #calc average i value over the duplicated bins ('Sum of ints from k to n' = n(n+1)/2 - k(k+1)/2)
+                    for dup in range(i-dupcount, i):
+                        palette.append((int(low[0]+dupstep*rstep), int(low[1]+dupstep*gstep), int(low[2]+dupstep*bstep), low[3]))
+                else:
+                    palette.append((int(low[0]+i*rstep), int(low[1]+i*gstep), int(low[2]+i*bstep), low[3]))
+                dupcount = 1
+        for j in range(len(palette), 1<<bd):
+            palette.append(high)
+        return palette
 
-def normalize(matrices):
-    cdf = calcCDF(matrices)
-    #print(cdf)
-    for matrix in matrices:
-        for ipx in range(0, len(matrices[matrix])):
-            px = matrices[matrix][ipx]
-            for i in range(0, len(cdf)-1):             
-                if (px > cdf[i] and px <= cdf[i+1]):
-                    matrices[matrix][ipx] = i+1
-                    break
-    return cdf
+    def getTileBounds(self):
+        xmin = 2<<self.zoom
+        xmax = -1
+        ymin = 2<<self.zoom
+        ymax = -1
+        for tile in self.tiles:
+            if(tile%(2<<self.zoom) > xmax):
+                xmax = tile%(2<<self.zoom)
+            if(tile%(2<<self.zoom) < xmin):
+                xmin = tile%(2<<self.zoom)
+            if(tile>>(self.zoom+1) > ymax):
+                ymax = tile>>(self.zoom+1)
+            if(tile>>(self.zoom+1) < ymin):
+                ymin = tile>>(self.zoom+1)
+        self.tilebounds = [xmin, ymin, xmax, ymax]
+
+
+    def zoomOutTile(self, tilex, tiley, has_data):
+        zoom = self.zoom-1
+        zmatrix = [0]*256*256
+        for i in range(0, 4):
+            if(has_data[i]):
+                mat = self.tiles[((tiley+(i>>1))<<(zoom+2))+(tilex+(i%2))]
+                for row in range(0, 128):
+                    for col in range(0, 128):
+                        zrow = 128*(i>>1)+row
+                        zcol = 128*(i%2)+col
+                        zmatrix[(zrow<<8)+zcol] = mat[(row<<9)+(col<<1)]+mat[(row<<9)+(col<<1)+1]+mat[(row<<9) + 256 + (col<<1)]+mat[(row<<9)+256+(col<<1)+1]
+        return zmatrix
+
+    def makeZoomedOutTileset(self):
+        zoom = self.zoom -1
+        zoomTiles = TileSet(zoom)
+        #starting at min y row, find all tiles 1 above or below and create tiles just for those that have at least 1 sub-tile filled
+        yrow = self.tilebounds[1]
+        while(yrow < self.tilebounds[3]+2):
+            xcol = self.tilebounds[0]
+            while(xcol < self.tilebounds[2]+2):
+                has_data = [False, False, False, False]
+                y0 = yrow-(yrow%2)
+                y1 = y0+1
+                has_data[0+(xcol%2)] = ((y0<<zoom+2)+xcol in self.tiles)
+                has_data[2+(xcol%2)] = ((y1<<zoom+2)+xcol in self.tiles)
+                if(True in has_data):
+                    #check 1 col right for tiles with data (only if x even)
+                    if(xcol%2==0):
+                        has_data[1] = ((y0<<zoom+2)+xcol+1 in self.tiles)
+                        has_data[3] = ((y1<<zoom+2)+xcol+1 in self.tiles)
+                    x0 = xcol -(xcol%2)
+                    zoomTiles.tiles[(y0<<(zoomTiles.zoom))+(x0>>1)] = self.zoomOutTile(x0, y0, has_data)
+                    xcol+=2-(xcol%2)
+                else:
+                    xcol+=1
+            yrow += 2
+
+        zoomTiles._calcPDF()
+        zoomTiles._calcCDF()
+        zoomTiles._calcDecileCutoffs()
+        zoomTiles.getTileBounds()
+        return zoomTiles
+
+
 
 def main():
     zoommax = 16
     zoommin = 12
     tiles = {}
-    #files = ["activity_4400110058.gpx", "activity_4425559408.gpx", "activity_4411465891.gpx", "activity_4440528100.gpx"]
     files = []
     filelocation = "/Users/jtblair/Downloads/"
+    data = RunData(zoommax)
+
     for f in os.listdir(filelocation):
         if fnmatch.fnmatch(f, "activity_4*.gpx"):
             files.append(f)
 
     for f in files:
-        parseGPX(filelocation+f, zoommax, tiles)
+        data.readInGPX(filelocation+f)
     
-    #testpoints = [[],[[49, 51], [48, 54], [44, 56]]]
-    #testmat = tile2matrix(testpoints)
     zoom = zoommax
     if not os.path.exists("map/"+str(zoom)):
             os.mkdir("map/"+str(zoom))
-    matrices = {}
 
-    for tile in tiles:
-        tile2matrix(tile, tiles[tile], matrices) #connect points using bresenham's line algorithm, output tiles as 256x256 arrays
-    cdf = []            
+    matrices = TileSet(zoom)
+    matrices.initFromRunData(data)
+    palette = matrices.makeGradientPalette((30,30,30,150), (60,30,155,200), (130,240,255,200), 8);
+
     for zlevel in range(1, zoommax - zoommin +1):
         zoom = zoommax - zlevel
+        print(zoom)
         if not os.path.exists("map/"+str(zoom)):
             os.mkdir("map/"+str(zoom))
-        zoommatrices = zoomOut(zoom, matrices)
-        cdf = normalize(matrices)
-        for matrix in matrices:
-            x = matrix%(2<<(zoom+1))
-            y = matrix>>(zoom+2)
-            saveMatrixAsPNG(zoom+1, x, y, cdf, matrices[matrix]) 
+        zoommatrices = matrices.makeZoomedOutTileset()
+        matrices.normalize()
+        for matrix in matrices.tiles:
+            matrices.saveTileAsPNG(matrix, palette, 8) 
 
         matrices = zoommatrices.copy()
-    
-    cdf = normalize(matrices)
-    for matrix in matrices:
-        x = matrix%(2<<(zoom))
-        y = matrix>>(zoom+1)
-        saveMatrixAsPNG(zoom, x, y, cdf, matrices[matrix])
+        palette = matrices.makeGradientPalette((30,30,30,150), (60,30,155,200), (130,240,255,200), 8);
+
+    matrices.normalize()    
+    for matrix in matrices.tiles:
+        matrices.saveTileAsPNG(matrix, palette, 8); 
 
 if __name__ == "__main__":
     main()
