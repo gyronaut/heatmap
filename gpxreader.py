@@ -27,7 +27,6 @@ class RunData():
         y = 256.0/(2.0*math.pi)*(2**self.zoom)*(math.pi - math.log(math.tan(math.pi/4.0 + (lat*math.pi/180.0)/2.0)))
         return [int(x),int(y)]
     
-    #TODO: look into small missing line segments (for example, check activity that went manor to airport blvd, couple small missing parts (single pixel missing?)) --> missing pixel is happening durng addBoundaryPoints when one of the points is already on the boundary E.G. if a is on the x boundary of a tile, pixel [ax,ay-1] might be included in the line from a to b, but would not be added as a boundary point
     def _addBoundaryPoints(self, segment, tilenum, oldsegment, oldtilenum):
         a = segment[0]
         b = oldsegment[len(oldsegment)-1]
@@ -47,16 +46,16 @@ class RunData():
             m = float(dely)/float(delx)
             if deltiley==0:
                 midax = round(float(a[0])/255.0)*255
-                miday = round(a[1] - m*(a[0]-midax))
+                miday = round(a[1] - m*(a[0]-(midax - (deltilex*0.499))))
                 midbx = round(float(b[0])/255.0)*255
-                midby = round(b[1] + m*(midbx - b[0]))
+                midby = round(b[1] + m*((midbx + (deltilex*0.499)) - b[0]))
                 mida = [midax, miday]
                 midb = [midbx, midby]
             elif deltilex==0:
                 miday = round(float(a[1])/255.0)*255
-                midax = round(a[0] - (a[1]-miday)/m)
+                midax = round(a[0] - (a[1]-(miday - deltiley*0.499))/m)
                 midby = round(float(b[1])/255.0)*255
-                midbx = round(b[0] + (midby - b[1])/m)
+                midbx = round(b[0] + ((midby + deltiley*0.499) - b[1])/m)
                 mida = [midax, miday]
                 midb = [midbx, midby]
             else:
@@ -102,9 +101,9 @@ class RunData():
                     mida = [round(float(a[0])/255.0)*255, round(float(a[1])/255.0)*255]
                     midb = [round(float(b[0])/255.0)*255, round(float(b[1])/255.0)*255]
 
-        if(b[0]%255 != 0 and b[1]%255 != 0):
+        if(b[0] != midb[0] or b[1] != midb[1]):
             oldsegment.append(midb)
-        if(a[0]%255 != 0 and a[1]%255 != 0):
+        if(a[0] != mida[0] or a[1] != mida[1]):
             segment.insert(0, mida)
 
     def readInGPX(self, gpxfile):
@@ -275,8 +274,8 @@ class TileSet():
         sample = random.sample(range(0, 256*256), 20000)
         for idx in sample:
             pt = data[idx]
-            if(pt>99):
-                pt=99
+            if(pt>999):
+                pt=999
             self.PDF[pt]+=1
 
 
@@ -315,15 +314,15 @@ class TileSet():
                         self.tiles[tile][ipx] = i+1
                         break
 
-    def saveTileAsPNG(self, tilenum, p, bd):
+    def saveTileAsPNG(self, mapfolder, tilenum, p, bd):
         x = tilenum%(2<<(self.zoom))
         y = tilenum>>(self.zoom+1)
-        if not os.path.exists("map/"+str(self.zoom)+"/"+str(x)):
-            os.mkdir("map/"+str(self.zoom)+"/"+str(x))
+        if not os.path.exists(mapfolder+str(self.zoom)+"/"+str(x)):
+            os.mkdir(mapfolder+str(self.zoom)+"/"+str(x))
 
         w = png.Writer(size=(256,256), palette = p, bitdepth = bd)            
         rows = w.array_scanlines(self.tiles[tilenum])
-        f = open("map/"+str(self.zoom)+"/"+str(x)+"/"+str(y)+".png", "wb")
+        f = open(mapfolder+str(self.zoom)+"/"+str(x)+"/"+str(y)+".png", "wb")
         w.write(f, rows)
         f.close()
     
@@ -348,6 +347,15 @@ class TileSet():
         for j in range(len(palette), 1<<bd):
             palette.append(high)
         return palette
+
+    def savePaletteAsPNG(self, palette, name):
+        mat = [0]*100*40;
+        for x in range(25,75):
+            i = math.floor((x-25.)/5.)
+            for y in range(10,30):
+                mat[x*100 + y] = palette[i]        
+        w = png.Writer(size=(100,40), palette = palette, bitdepth = 8);
+
 
     def getTileBounds(self):
         xmin = 2<<self.zoom
@@ -380,6 +388,7 @@ class TileSet():
         return zmatrix
 
     def makeZoomedOutTileset(self):
+        print(self.tilebounds)
         zoom = self.zoom -1
         zoomTiles = TileSet(zoom)
         #starting at min y row, find all tiles 1 above or below and create tiles just for those that have at least 1 sub-tile filled
@@ -418,6 +427,7 @@ def main():
     tiles = {}
     files = []
     filelocation = "/Users/jtblair/Downloads/"
+    mapfolder = "map/"
     data = RunData(zoommax)
 
     for f in os.listdir(filelocation):
@@ -427,30 +437,38 @@ def main():
     for f in files:
         data.readInGPX(filelocation+f)
     
+    
+    #data.readInGPX("/Users/jtblair/Downloads/activity_4662086957.gpx") #test activity showing missing boundary segments (FIXED)
     zoom = zoommax
-    if not os.path.exists("map/"+str(zoom)):
-            os.mkdir("map/"+str(zoom))
+    if not os.path.exists(mapfolder+str(zoom)):
+            os.mkdir(mapfolder+str(zoom))
 
     matrices = TileSet(zoom)
     matrices.initFromRunData(data)
-    palette = matrices.makeGradientPalette((30,30,30,150), (60,30,155,200), (130,240,255,200), 8);
-
+    #for tile in matrices.tiles:
+        #print(tile>>zoom)
+    #palette = matrices.makeGradientPalette((30,30,30,200), (60,30,155,200), (130,240,255,200), 8); #blue-purple
+    palette = matrices.makeGradientPalette((15,15,15,200), (60,40,150,225), (255,195,210,225), 8); #pink-purple
+    print(matrices.deciles)
+    print(palette[:10])
     for zlevel in range(1, zoommax - zoommin +1):
         zoom = zoommax - zlevel
         print(zoom)
-        if not os.path.exists("map/"+str(zoom)):
-            os.mkdir("map/"+str(zoom))
+        if not os.path.exists(mapfolder+str(zoom)):
+            os.mkdir(mapfolder+str(zoom))
         zoommatrices = matrices.makeZoomedOutTileset()
         matrices.normalize()
         for matrix in matrices.tiles:
-            matrices.saveTileAsPNG(matrix, palette, 8) 
+            matrices.saveTileAsPNG(mapfolder, matrix, palette, 8) 
 
         matrices = zoommatrices.copy()
-        palette = matrices.makeGradientPalette((30,30,30,150), (60,30,155,200), (130,240,255,200), 8);
-
+        #palette = matrices.makeGradientPalette((30,30,30,150), (60,30,155,200), (130,240,255,200), 8);
+        palette = matrices.makeGradientPalette((15,15,15,200), (60,40,150,225), (255,195,210,225), 8); #pink-purple
+        print(matrices.deciles)
+        print(palette[:10]);
     matrices.normalize()    
     for matrix in matrices.tiles:
-        matrices.saveTileAsPNG(matrix, palette, 8); 
+        matrices.saveTileAsPNG(mapfolder, matrix, palette, 8); 
 
 if __name__ == "__main__":
     main()
