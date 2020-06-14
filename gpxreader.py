@@ -426,12 +426,12 @@ def main():
     zoommin = 12
     tiles = {}
     files = []
-    filelocation = "/Users/jtblair/Downloads/"
+    filelocation = "/Users/jtblair/repos/heatmap/activities/"
     mapfolder = "map/"
     data = RunData(zoommax)
 
     for f in os.listdir(filelocation):
-        if fnmatch.fnmatch(f, "activity_4*.gpx"):
+        if fnmatch.fnmatch(f, "activity_*.gpx"):
             files.append(f)
 
     for f in files:
